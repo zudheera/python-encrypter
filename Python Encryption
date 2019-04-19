@@ -1,0 +1,198 @@
+import hashlib
+from Crypto.Hash import SHA256
+from Crypto.Cipher import AES
+import os, random, sys, pkg_resources
+import glob
+from colorama import init
+from termcolor import colored
+from colorama import Fore, Back, Style
+import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.MIMEBase import MIMEBase
+from email import encoders
+import smtplib
+init(convert=True)
+
+def encrypt(key, filename):
+    chunksize = 64 * 1024
+    outFile = os.path.join(os.path.dirname(filename), "(encrypted)"+os.path.basename(filename))
+    filesize = str(os.path.getsize(filename)).zfill(16)
+    IV = ''
+
+    for i in range(16):
+        IV += chr(random.randint(0, 0xFF))
+    
+    encryptor = AES.new(key, AES.MODE_CBC, IV)
+
+    with open(filename, "rb") as infile:
+        with open(outFile, "wb") as outfile:
+            outfile.write(filesize)
+            outfile.write(IV)
+            while True:
+                chunk = infile.read(chunksize)
+                
+                if len(chunk) == 0:
+                    break
+
+                elif len(chunk) % 16 !=0:
+                    chunk += ' ' *  (16 - (len(chunk) % 16))
+
+                outfile.write(encryptor.encrypt(chunk))
+
+
+def decrypt(key, filename):
+    outFile = os.path.join(os.path.dirname(filename), os.path.basename(filename[11:]))
+    chunksize = 64 * 1024
+    with open(filename, "rb") as infile:
+        filesize = infile.read(16)
+        IV = infile.read(16)
+
+        decryptor = AES.new(key, AES.MODE_CBC, IV)
+        
+        with open(outFile, "wb") as outfile:
+            while True:
+                chunk = infile.read(chunksize)
+                if len(chunk) == 0:
+                    break
+
+                outfile.write(decryptor.decrypt(chunk))
+
+            outfile.truncate(int(filesize))
+    
+def allfiles():
+    allFiles = []
+    for root, subfiles, files in os.walk(os.getcwd()):
+        for names in files:
+            allFiles.append(os.path.join(root, names))
+
+    return allFiles
+
+    
+choice = raw_input(colored("\nDo you want to (E)ncrypt or (D)ecrypt?","yellow"))
+password = raw_input(colored("Enter the password: ","yellow"))
+encFiles = allfiles()
+
+if choice == "E":
+    for Tfiles in encFiles: 
+        if os.path.basename(Tfiles).startswith("(encrypted)"):
+            print (colored("\n%s is already encrypted" %str(Tfiles),"red"))
+            pass
+
+        elif Tfiles == os.path.join(os.getcwd(), sys.argv[0]):
+            pass 
+        else:
+            BLOCKSIZE = 65536
+            hasher = hashlib.sha256()
+            with open(Tfiles,'rb') as temp_file:
+                buf = temp_file.read(BLOCKSIZE)
+                hasher.update(buf)
+                buf = temp_file.read(BLOCKSIZE)
+                print "\nHash value is:" ,hasher.hexdigest()
+            encrypt(SHA256.new(password).digest(), str(Tfiles))
+            print(colored("\nDone encrypting..! %s" %str(Tfiles), "green"))
+            text_file = open(os.path.basename(Tfiles)+"(Hashpass).txt", "w")
+            text_file.write(hasher.hexdigest())
+            text_file_cp = text_file
+            text_file.close()
+            os.remove(Tfiles)
+            #just clear the comments
+            #host = "Yor Host name gose here"
+            #port = port No gose here
+            username = raw_input(colored("\nEnter Your E-Mail Address:","yellow"))
+            passworde = raw_input(colored("\nEnter The Password:","yellow"))
+            from_email = username
+            to_list = raw_input(colored("\nEnter The Recivers Email Address:","yellow"))
+
+            try:
+                email_conn = smtplib.SMTP(host, port)
+                email_conn.ehlo()
+                email_conn.starttls()
+                email_conn.login(username, passworde)
+                the_msg = MIMEMultipart("alternative")
+                the_msg["Subject"] = "!..CONFIDENTIAL..!"
+                the_msg["From"] = from_email
+                the_msg["To"] = to_list[0]
+                plain_txt = "Testing the message"
+                html_txt = """\
+                <html>
+                    <head></head>
+                    <body>
+                        <p><strong>Hi...!</strong></p>
+                        <p>You have recived a Password of an Encrypted file and the Hash file.<p/>
+                        <p>Passwrod = {0} 
+                        <p>Made by <a href='https://www.facebook.com/sudheeera'>Team LMU</a>.
+                        </p>
+                    </body>
+                </html>
+                """.format(password)
+
+                part_1 = MIMEText(plain_txt, "plain")
+                part_2 = MIMEText(html_txt, "html")
+                the_msg.attach(part_1)
+                the_msg.attach(part_2)
+
+                filename = os.path.basename(Tfiles)+"(Hashpass).txt"
+                # with open(os.path.dirname(str(Tfiles)), "(encrypted)"+os.path.basename(str(Tfiles))) as f:
+                with open(os.path.basename(Tfiles)+"(Hashpass).txt") as f:
+                    attachment = f
+                    # instance of MIMEBase and named as p
+                    p = MIMEBase('application', 'octet-stream')
+
+                    # To change the payload into encoded form
+                    p.set_payload((attachment).read())
+
+                # encode into base64
+                encoders.encode_base64(p)
+
+                p.add_header('Content-Disposition', "attachment; filename= %s" % filename)
+
+                # attach the instance 'p' to instance 'msg'
+                the_msg.attach(p)
+
+                email_conn.sendmail(from_email, to_list, the_msg.as_string())
+                email_conn.quit()
+                print(colored("\nPassword and the Hash File Sent..!","green"))
+            except smtplib.SMTPException:
+                print(colored("\nError sending message...!","red"))
+
+elif choice == "D":
+    filename = raw_input(colored("\nEnter the filename to decrypt: ","yellow"))
+    if not os.path.exists(filename):
+        print (colored("\nThe file does not exist","red"))
+        sys.exit(0)
+    elif not filename.startswith("(encrypted)"):
+        print (colored("\n%s is already not encrypted" %filename,"red"))
+        sys.exit()
+    else:
+        decrypt(SHA256.new(password).digest(), filename)
+        print (colored("\nDone decrypting...! %s" %filename,"green"))
+        os.remove(filename)
+        print(colored("\nMake Sure both Hashpass and Decrypted file in same Directry..!","green"))
+        decfile = raw_input(colored("Enter the Decrypted File Name for intergrity Check:","yellow"))
+        BLOCKSIZE = 65536
+        hasher = hashlib.sha256()
+        with open(decfile,'rb') as temp1_file:
+                buf = temp1_file.read(BLOCKSIZE)
+                hasher.update(buf)
+                buf = temp1_file.read(BLOCKSIZE)
+                print "\nHash value is:" ,hasher.hexdigest()
+        text_file = open(os.path.basename(decfile)+"(Hashpass Decrypted).txt", "w")
+        text_file.write(hasher.hexdigest())
+        text_file.close()
+        f1=open(decfile+"(Hashpass).txt", "r")
+        f2=open(decfile+"(Hashpass Decrypted).txt", "r")
+        for line1 in f1:
+            for line2 in f2:
+                if line1==line2:
+                    print (colored("\nHash Matched. The File is Not Tampered...!\n","green"))
+                else:
+                    print(colored("\nWarning...! The File Has been Tampered","green"))
+                break
+        f1.close()
+        f2.close()
+        os.remove(decfile+"(Hashpass Decrypted).txt")
+
+else:
+    print (colored("\nPlease choose a valid command...!","red"))
+    sys.exit()
